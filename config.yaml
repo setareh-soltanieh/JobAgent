@@ -1,0 +1,30 @@
+scraping:
+  tenant: "td"
+  site: "TD_Bank_Careers"
+  base_url: "https://td.wd3.myworkdayjobs.com"
+  limit_per_page: 20
+  rate_limit_delay: 1.0
+
+scoring:
+  model: "gemma4:e4b"
+  min_score: 6
+
+output:
+  csv_file: "jobs.csv"
+  fieldnames:
+    - "date"
+    - "title"
+    - "company"
+    - "location"
+    - "url"
+    - "score"
+    - "reason"
+
+cache:
+  enabled: true
+  cache_file: "jobs_cache.json"
+
+retry:
+  max_attempts: 3
+  base_delay: 2.0
+  max_delay: 30.0

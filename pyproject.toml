@@ -1,0 +1,12 @@
+[project]
+name = "jobsearchagent"
+version = "0.1.0"
+description = "Personal job search automation agent using AI for relevance scoring"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "bs4>=0.0.2",
+    "ollama>=0.6.1",
+    "pyyaml>=6.0.0",
+    "requests>=2.33.1",
+]

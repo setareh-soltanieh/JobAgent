@@ -1,0 +1,45 @@
+import time
+import requests
+import logging
+from typing import Optional
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+def retry_with_backoff(
+    func, max_attempts: int = 3, base_delay: float = 2.0, max_delay: float = 30.0
+):
+    for attempt in range(max_attempts):
+        try:
+            return func()
+        except (requests.exceptions.RequestException, TimeoutError) as e:
+            if attempt == max_attempts - 1:
+                raise
+            delay = min(base_delay * (2**attempt), max_delay)
+            logger.warning(
+                f"Request failed (attempt {attempt + 1}/{max_attempts}), retrying in {delay}s: {e}"
+            )
+            time.sleep(delay)
+
+
+def safe_request(
+    method: str, url: str, headers: Optional[dict] = None, **kwargs
+) -> Optional[requests.Response]:
+    def _make_request():
+        resp = requests.request(method, url, headers=headers, timeout=30, **kwargs)
+        resp.raise_for_status()
+        return resp
+
+    try:
+        return retry_with_backoff(_make_request)
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request failed after retries: {url} - {e}")
+        return None
+
+
+HEADERS = {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+    "User-Agent": "Mozilla/5.0 (compatible; JobSearchAgent/1.0)",
+}
