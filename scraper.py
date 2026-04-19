@@ -45,9 +45,13 @@ class JobScraper:
     def __init__(self, config: dict, company_config: dict, cache_enabled: bool = True):
         self.company = company_config["name"]
         self.tenant = company_config["tenant"]
-        self.site = company_config["site"]
+        self.site = company_config.get("site", "")
         self.base_url = company_config["base_url"]
-        self.api_url = f"{self.base_url}/wday/cxs/{self.tenant}/{self.site}/jobs"
+        self.api_url = (
+            f"{self.base_url}/wday/cxs/{self.tenant}/{self.site}/jobs"
+            if self.site
+            else f"{self.base_url}/wday/cxs/{self.tenant}/jobs"
+        )
         self.limit = config["scraping"]["limit_per_page"]
         self.rate_limit_delay = config["scraping"]["rate_limit_delay"]
         self.search_text = config["scraping"].get("search_text", "")
@@ -58,7 +62,10 @@ class JobScraper:
         )
 
     def fetch_job_detail(self, external_path: str) -> str:
-        public_url = f"{self.base_url}/{self.site}{external_path}"
+        if self.site:
+            public_url = f"{self.base_url}/{self.site}{external_path}"
+        else:
+            public_url = f"{self.base_url}{external_path}"
         logger.info(f"Fetching job detail from: {external_path}")
 
         if self.cache:
@@ -121,7 +128,10 @@ class JobScraper:
 
             for p in postings:
                 external_path = p.get("externalPath", "")
-                job_url = f"{self.base_url}/{self.site}{external_path}"
+                if self.site:
+                    job_url = f"{self.base_url}/{self.site}{external_path}"
+                else:
+                    job_url = f"{self.base_url}{external_path}"
 
                 description = self.fetch_job_detail(external_path)
                 time.sleep(self.rate_limit_delay)
