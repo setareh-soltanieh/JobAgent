@@ -1,9 +1,17 @@
 scraping:
-  tenant: "td"
-  site: "TD_Bank_Careers"
-  base_url: "https://td.wd3.myworkdayjobs.com"
   limit_per_page: 20
   rate_limit_delay: 1.0
+  search_text: "machine learning OR \"deep learning\" OR AI OR \"artificial intelligence\" OR \"data science\" OR \"genai\" OR \"generative ai\" OR NLP OR \"natural language\""
+
+companies:
+  - name: "TD Bank"
+    tenant: "td"
+    site: "TD_Bank_Careers"
+    base_url: "https://td.wd3.myworkdayjobs.com"
+  - name: "Autodesk"
+    tenant: "autodesk"
+    site: "Autodesk_Careers"
+    base_url: "https://autodesk.wd3.myworkdayjobs.com"
 
 scoring:
   model: "gemma4:e4b"

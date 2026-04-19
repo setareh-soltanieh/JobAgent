@@ -2,6 +2,7 @@ import os
 import json
 import time
 import logging
+import requests
 from pathlib import Path
 from typing import Optional
 
@@ -41,13 +42,15 @@ class JobCache:
 
 
 class JobScraper:
-    def __init__(self, config: dict, cache_enabled: bool = True):
-        self.tenant = config["scraping"]["tenant"]
-        self.site = config["scraping"]["site"]
-        self.base_url = config["scraping"]["base_url"]
+    def __init__(self, config: dict, company_config: dict, cache_enabled: bool = True):
+        self.company = company_config["name"]
+        self.tenant = company_config["tenant"]
+        self.site = company_config["site"]
+        self.base_url = company_config["base_url"]
         self.api_url = f"{self.base_url}/wday/cxs/{self.tenant}/{self.site}/jobs"
         self.limit = config["scraping"]["limit_per_page"]
         self.rate_limit_delay = config["scraping"]["rate_limit_delay"]
+        self.search_text = config["scraping"].get("search_text", "")
         self.cache = (
             JobCache(config["cache"]["cache_file"])
             if cache_enabled and config["cache"]["enabled"]
@@ -55,27 +58,34 @@ class JobScraper:
         )
 
     def fetch_job_detail(self, external_path: str) -> str:
-        url = f"{self.base_url}/wday/cxs/{self.tenant}/{self.site}/jobs/job{external_path}"
+        public_url = f"{self.base_url}/{self.site}{external_path}"
+        logger.info(f"Fetching job detail from: {external_path}")
 
         if self.cache:
-            cached = self.cache.get(url)
+            cached = self.cache.get(public_url)
             if cached:
                 logger.debug(f"Cache hit for: {external_path}")
                 return cached
 
+        html_headers = {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+
         def _fetch():
-            return network.safe_request("GET", url, headers=network.HEADERS)
+            resp = requests.get(public_url, headers=html_headers, timeout=30)
+            resp.raise_for_status()
+            return resp
 
         resp = network.retry_with_backoff(_fetch)
         if not resp:
             return ""
 
-        detail = resp.json().get("jobPostingInfo", {})
-        raw_html = detail.get("jobDescription", "")
-        description = BeautifulSoup(raw_html, "html.parser").get_text(" ", strip=True)
+        description = BeautifulSoup(resp.text, "html.parser").get_text(" ", strip=True)
 
         if self.cache and description:
-            self.cache.set(url, description)
+            self.cache.set(public_url, description)
 
         return description
 
@@ -90,7 +100,7 @@ class JobScraper:
                 "appliedFacets": {},
                 "limit": self.limit,
                 "offset": offset,
-                "searchText": "",
+                "searchText": self.search_text,
             }
 
             resp = network.safe_request(
@@ -101,12 +111,17 @@ class JobScraper:
 
             data = resp.json()
             postings = data.get("jobPostings", [])
+            total = data.get("total", 0)
+
+            if offset == 0:
+                logger.info(f"API reports {total} total jobs available")
+
             if not postings:
                 break
 
             for p in postings:
                 external_path = p.get("externalPath", "")
-                job_url = f"{self.base_url}/en-US/{self.site}{external_path}"
+                job_url = f"{self.base_url}/{self.site}{external_path}"
 
                 description = self.fetch_job_detail(external_path)
                 time.sleep(self.rate_limit_delay)
@@ -118,7 +133,7 @@ class JobScraper:
                 jobs.append(
                     {
                         "title": p.get("title", ""),
-                        "company": "TD Bank",
+                        "company": self.company,
                         "location": location,
                         "url": job_url,
                         "description": description[:2000],

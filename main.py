@@ -14,6 +14,8 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%H:%M:%S",
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
@@ -34,8 +36,12 @@ def append_jobs_to_csv(csv_file: str, fieldnames: list, jobs: list[dict]):
         writer.writerows(jobs)
 
 
-def run_agent(criteria_override: Optional[str] = None, min_score_override: Optional[int] = None):
-    
+def run_agent(
+    criteria_override: Optional[str] = None,
+    min_score_override: Optional[int] = None,
+    search_override: Optional[str] = None,
+):
+
     config = load_config()
 
     if criteria_override:
@@ -44,14 +50,29 @@ def run_agent(criteria_override: Optional[str] = None, min_score_override: Optio
     if min_score_override is not None:
         config["scoring"]["min_score"] = min_score_override
 
+    if search_override is not None:
+        config["scraping"]["search_text"] = search_override
+
     csv_file = config["output"]["csv_file"]
     fieldnames = config["output"]["fieldnames"]
 
     seen = load_seen_urls(csv_file)
     logger.info(f"Loaded {len(seen)} previously seen job URLs")
 
-    scraper = JobScraper(config)
-    all_jobs = scraper.scrape_all()
+    all_jobs = []
+    companies = config.get("companies", [])
+    if not companies:
+        logger.error("No companies configured in config.yaml")
+        return
+
+    for company_config in companies:
+        logger.info(f"\n{'=' * 50}")
+        logger.info(f"Scraping: {company_config['name']}")
+        logger.info(f"{'=' * 50}")
+
+        scraper = JobScraper(config, company_config)
+        jobs = scraper.scrape_all()
+        all_jobs.extend(jobs)
 
     new_jobs = [j for j in all_jobs if j["url"] not in seen]
     logger.info(f"Found {len(new_jobs)} new jobs to evaluate")
@@ -101,9 +122,8 @@ def main():
 
     parser = argparse.ArgumentParser(description="Job Search Agent")
     parser.add_argument("--criteria", "-c", help="Override job search criteria")
-    parser.add_argument(
-        "--min-score", "-s", type=int, help="Minimum relevance score (1-10)"
-    )
+    parser.add_argument("--min-score", "-s", type=int, help="Minimum relevance score (1-10)")
+    parser.add_argument("--search", help="Search term to filter jobs (e.g., 'machine learning')")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     args = parser.parse_args()
@@ -111,7 +131,11 @@ def main():
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    run_agent(criteria_override=args.criteria, min_score_override=args.min_score)
+    run_agent(
+        criteria_override=args.criteria,
+        min_score_override=args.min_score,
+        search_override=args.search,
+    )
 
 
 if __name__ == "__main__":

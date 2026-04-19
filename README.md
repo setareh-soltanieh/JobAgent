@@ -48,14 +48,17 @@ uv run python main.py
 # Custom criteria
 uv run python main.py -c "Data Scientist roles in Vancouver"
 
+# Search for specific jobs (bypasses API limit)
+uv run python main.py --search "machine learning"
+
+# Search + custom criteria
+uv run python main.py --search "data scientist" -c "ML roles in Toronto"
+
 # Higher relevance threshold
 uv run python main.py -s 8
 
 # Debug logging
 uv run python main.py --debug
-
-# All options combined
-uv run python main.py -c "ML Engineer" -s 7 --debug
 ```
 
 ## Output
