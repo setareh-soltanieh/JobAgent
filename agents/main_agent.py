@@ -19,10 +19,6 @@ except ImportError:
 def main():
     load_dotenv()
 
-    user_prompt = input("What would you like the job agent to do? ").strip()
-    if not user_prompt:
-        user_prompt = "What companies are configured for job searching?"
-
     llm = ChatOllama(
         model="gemma4:e4b",
         temperature=0.7,
@@ -39,13 +35,23 @@ def main():
         ),
     )
 
-    result = agent.invoke({
-        "messages": [
-            {"role": "user", "content": user_prompt}
-        ]
-    })
+    messages = []
+    print("Job agent ready. Type 'exit', 'quit', or 'q' to stop.")
 
-    print(result["messages"][-1].content)
+    while True:
+        user_prompt = input("\nYou: ").strip()
+        if user_prompt.lower() in {"exit", "quit", "q"}:
+            print("Goodbye.")
+            break
+
+        if not user_prompt:
+            continue
+
+        messages.append({"role": "user", "content": user_prompt})
+        result = agent.invoke({"messages": messages})
+
+        messages = result["messages"]
+        print(f"\nAgent: {messages[-1].content}")
 
 
 if __name__ == "__main__":
