@@ -32,46 +32,63 @@ def search_jobs(
     location: str = "",
     max_results: int = 50,
 ) -> str:
-    """Search for job postings from company career sites.
+    """Search for jobs at one configured company using user-provided criteria.
 
     Args:
-        company_name: Name of the company to search (e.g., "Autodesk").
-                     If not provided, searches all configured companies.
-        role: Job title or role keywords to search for (e.g., "Machine Learning Engineer").
-        location: Location keywords to filter by (e.g., "Toronto", "Toronto area", "Remote Canada").
+        company_name: Name of the company to search (e.g., "Autodesk", "TD Bank").
+        role: Job title or role keywords (e.g., "Machine Learning Engineer").
+        location: Location keywords (e.g., "Toronto", "Toronto area", "Remote Canada").
         max_results: Maximum number of matching jobs to return.
 
     Returns:
-        A list of found jobs with titles, companies, locations, and URLs.
+        JSON with matching jobs for the requested company, role, and location.
     """
     config = load_config()
     companies = config.get("companies", [])
 
-    if company_name:
-        companies = [c for c in companies if company_name.lower() in c["name"].lower()]
-        if not companies:
-            available = [c["name"] for c in config.get("companies", [])]
-            return json_output(SearchJobsOutput(
-                message=f"No company found matching '{company_name}'. Available: {available}",
-                total_found=0, total_matching=0, jobs=[],
-            ))
-
-    if not companies:
+    if not company_name:
         return json_output(SearchJobsOutput(
-            message="No companies configured in config.yaml",
+            message="Please provide a company name to search.",
             total_found=0, total_matching=0, jobs=[],
         ))
 
-    if role:
-        config["scraping"]["search_text"] = role
- 
+    company_config = next(
+        (c for c in companies if company_name.lower() in c["name"].lower()),
+        None,
+    )
+    if not company_config:
+        available = [c["name"] for c in companies]
+        return json_output(SearchJobsOutput(
+            message=f"No company found matching '{company_name}'. Available: {available}",
+            total_found=0, total_matching=0, jobs=[],
+        ))
+
+    search_text = " ".join(part for part in [role, location] if part).strip()
+    scraping_config = config.get("scraping", {})
+
+    search_config = {
+        "scraping": {
+            "limit_per_page": scraping_config.get("limit_per_page", 20),
+            "rate_limit_delay": scraping_config.get("rate_limit_delay", 0),
+            "search_text": search_text,
+        },
+        "cache": config.get(
+            "cache",
+            {"enabled": True, "cache_file": "jobs_cache.json"},
+        ),
+    }
+
     all_jobs: list[JobResult] = []
-    for company_config in companies:
-        try:
-            scraper = JobScraper(config, company_config)
-            all_jobs.extend(JobResult.from_scraped_job(job) for job in scraper.scrape_all())
-        except Exception as e:
-            print(f"Warning: failed to scrape {company_config.get('name', '?')}: {e}")
+    try:
+        scraper = JobScraper(search_config, company_config)
+        all_jobs.extend(JobResult.from_scraped_job(job) for job in scraper.scrape_all())
+    except Exception as e:
+        session.search_results = []
+        session.filtered_jobs = []
+        return json_output(SearchJobsOutput(
+            message=f"Failed to search {company_config['name']}: {e}",
+            total_found=0, total_matching=0, jobs=[],
+        ))
 
     if not all_jobs:
         session.search_results = []

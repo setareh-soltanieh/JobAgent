@@ -61,27 +61,38 @@ class JobScraper:
             else None
         )
 
-    def fetch_job_detail(self, external_path: str) -> str:
+    def build_public_url(self, external_path: str) -> str:
+        if external_path.startswith("http"):
+            return external_path
         if self.site:
-            public_url = f"{self.base_url}/{self.site}{external_path}"
-        else:
-            public_url = f"{self.base_url}{external_path}"
+            return f"{self.base_url}/{self.site}{external_path}"
+        return f"{self.base_url}{external_path}"
+
+    def build_detail_api_url(self, external_path: str) -> str:
+        if external_path.startswith("http"):
+            return external_path
+        if external_path.startswith("/wday/cxs/"):
+            return f"{self.base_url}{external_path}"
+        if external_path.startswith("/job/"):
+            if self.site:
+                return f"{self.base_url}/wday/cxs/{self.tenant}/{self.site}{external_path}"
+            return f"{self.base_url}/wday/cxs/{self.tenant}{external_path}"
+        if external_path.startswith("/jobs/"):
+            return f"{self.api_url}{external_path.removeprefix('/jobs')}"
+        return f"{self.api_url}{external_path}"
+
+    def fetch_job_detail(self, external_path: str) -> str:
+        detail_url = self.build_detail_api_url(external_path)
         logger.info(f"Fetching job detail from: {external_path}")
 
         if self.cache:
-            cached = self.cache.get(public_url)
+            cached = self.cache.get(detail_url)
             if cached:
                 logger.debug(f"Cache hit for: {external_path}")
                 return cached
 
-        html_headers = {
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9",
-        }
-
         def _fetch():
-            resp = requests.get(public_url, headers=html_headers, timeout=30)
+            resp = requests.get(detail_url, headers=network.HEADERS, timeout=30)
             resp.raise_for_status()
             return resp
 
@@ -89,10 +100,14 @@ class JobScraper:
         if not resp:
             return ""
 
-        description = BeautifulSoup(resp.text, "html.parser").get_text(" ", strip=True)
+        try:
+            detail = resp.json()
+            description = json.dumps(detail, ensure_ascii=False)
+        except ValueError:
+            description = BeautifulSoup(resp.text, "html.parser").get_text(" ", strip=True)
 
         if self.cache and description:
-            self.cache.set(public_url, description)
+            self.cache.set(detail_url, description)
 
         return description
 
@@ -128,10 +143,7 @@ class JobScraper:
 
             for p in postings:
                 external_path = p.get("externalPath", "")
-                if self.site:
-                    job_url = f"{self.base_url}/{self.site}{external_path}"
-                else:
-                    job_url = f"{self.base_url}{external_path}"
+                job_url = self.build_public_url(external_path)
 
                 description = self.fetch_job_detail(external_path)
                 time.sleep(self.rate_limit_delay)

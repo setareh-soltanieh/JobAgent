@@ -14,11 +14,16 @@ def retry_with_backoff(
         try:
             return func()
         except (requests.exceptions.RequestException, TimeoutError) as e:
+            response = getattr(e, "response", None)
+            response_text = ""
+            if response is not None and response.text:
+                response_text = f" Response body: {response.text[:500]}"
             if attempt == max_attempts - 1:
                 raise
             delay = min(base_delay * (2**attempt), max_delay)
             logger.warning(
-                f"Request failed (attempt {attempt + 1}/{max_attempts}), retrying in {delay}s: {e}"
+                f"Request failed (attempt {attempt + 1}/{max_attempts}), "
+                f"retrying in {delay}s: {e}{response_text}"
             )
             time.sleep(delay)
 
@@ -34,7 +39,11 @@ def safe_request(
     try:
         return retry_with_backoff(_make_request)
     except requests.exceptions.RequestException as e:
-        logger.error(f"Request failed after retries: {url} - {e}")
+        response = getattr(e, "response", None)
+        response_text = ""
+        if response is not None and response.text:
+            response_text = f" Response body: {response.text[:500]}"
+        logger.error(f"Request failed after retries: {url} - {e}{response_text}")
         return None
 
 

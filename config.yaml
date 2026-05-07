@@ -10,8 +10,9 @@ companies:
     base_url: "https://td.wd3.myworkdayjobs.com"
   - name: "Autodesk"
     tenant: "autodesk"
-    site: ""
+    site: "Ext"
     base_url: "https://autodesk.wd1.myworkdayjobs.com"
+  
 
 scoring:
   model: "gemma4:e4b"
