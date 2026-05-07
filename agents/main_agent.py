@@ -12,9 +12,9 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
-    from .tools import filter_jobs, search_jobs, list_companies
+    from .tools import filter_jobs, save_jobs_to_notion, search_jobs, list_companies
 except ImportError:
-    from agents.tools import filter_jobs, search_jobs, list_companies
+    from agents.tools import filter_jobs, save_jobs_to_notion, search_jobs, list_companies
 
 def main():
     load_dotenv()
@@ -26,12 +26,15 @@ def main():
 
     agent = create_agent(
         model=llm,
-        tools=[search_jobs, filter_jobs, list_companies],
+        tools=[search_jobs, filter_jobs, save_jobs_to_notion, list_companies],
         system_prompt=(
-            "You are a job search assistant. You can list configured companies and search for jobs. "
-            "When the user mentions a role, location, or company, pass those as specific arguments "
-            "to the right tool. Use search_jobs first to collect jobs from a company. Then use "
-            "filter_jobs to filter and score the jobs from the most recent search."
+            "You are a job search assistant. Help with the user's current request without assuming "
+            "extra steps. Use list_companies when the user asks what companies are configured. Use "
+            "search_jobs when the user asks to find or search jobs; pass any company, role, or "
+            "location they mention as tool arguments. Use filter_jobs only when the user asks to "
+            "filter, refine, rank, score, or evaluate the jobs from the most recent search. Use "
+            "save_jobs_to_notion only when the user explicitly asks to save, add, put, or send jobs "
+            "to Notion; it can save either the latest filtered jobs or the latest search results."
         ),
     )
 
