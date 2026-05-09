@@ -4,11 +4,9 @@ import requests
 
 from langchain.tools import tool
 from config import load_config
-from scraper import JobScraper
 from scorer import JobScorer
 from .models import (
     FilterJobsOutput,
-    JobResult,
     ListCompaniesOutput,
     NotionJobEntry,
     NotionSaveFailure,
@@ -18,12 +16,15 @@ from .models import (
 )
 from .tool_helpers import (
     build_notion_properties,
+    build_search_config,
+    find_company_config,
     json_output,
     load_seen_urls,
-    load_notion_job_urls,
     matches_job,
-    normalize_url,
     notion_headers,
+    remove_jobs_already_in_notion,
+    reset_search_session,
+    scrape_company_jobs,
     session,
 )
 
@@ -51,13 +52,12 @@ def search_jobs(
     if not company_name:
         return json_output(SearchJobsOutput(
             message="Please provide a company name to search.",
-            total_found=0, total_matching=0, jobs=[],
+            total_found=0,
+            total_matching=0,
+            jobs=[],
         ))
 
-    company_config = next(
-        (c for c in companies if company_name.lower() in c["name"].lower()),
-        None,
-    )
+    company_config = find_company_config(company_name, companies)
     if not company_config:
         available = [c["name"] for c in companies]
         return json_output(SearchJobsOutput(
@@ -65,64 +65,38 @@ def search_jobs(
             total_found=0, total_matching=0, jobs=[],
         ))
 
-    search_text = " ".join(part for part in [role, location] if part).strip()
-    scraping_config = config.get("scraping", {})
-
-    search_config = {
-        "scraping": {
-            "limit_per_page": scraping_config.get("limit_per_page", 20),
-            "rate_limit_delay": scraping_config.get("rate_limit_delay", 0),
-            "search_text": search_text,
-        },
-        "cache": config.get(
-            "cache",
-            {"enabled": True, "cache_file": "jobs_cache.json"},
-        ),
-    }
-
-    all_jobs: list[JobResult] = []
     try:
-        scraper = JobScraper(search_config, company_config)
-        all_jobs.extend(JobResult.from_scraped_job(job) for job in scraper.scrape_all())
+        all_jobs = scrape_company_jobs(
+            build_search_config(config, role, location),
+            company_config,
+        )
     except Exception as e:
-        session.search_results = []
-        session.filtered_jobs = []
+        reset_search_session()
         return json_output(SearchJobsOutput(
             message=f"Failed to search {company_config['name']}: {e}",
             total_found=0, total_matching=0, jobs=[],
         ))
 
     if not all_jobs:
-        session.search_results = []
-        session.filtered_jobs = []
+        reset_search_session()
         return json_output(SearchJobsOutput(
             message="No jobs found.",
             total_found=0, total_matching=0, jobs=[],
         ))
- 
+    
     matching_jobs = [job for job in all_jobs if matches_job(job, role, location)]
 
     if not matching_jobs:
-        session.search_results = []
-        session.filtered_jobs = []
-        filters = []
-        if company_name:
-            filters.append(f"company matching '{company_name}'")
-        if role:
-            filters.append(f"role matching '{role}'")
-        if location:
-            filters.append(f"location matching '{location}'")
-        text = ", ".join(filters) if filters else "the requested filters"
+        reset_search_session()
         return json_output(SearchJobsOutput(
-            message=f"No jobs found for {text}.",
+            message="No jobs matched the requirements provided by the user.",
             total_found=len(all_jobs), total_matching=0, jobs=[],
         ))
 
     try:
-        notion_urls = load_notion_job_urls()
+        available_jobs, already_in_notion = remove_jobs_already_in_notion(matching_jobs)
     except Exception as e:
-        session.search_results = []
-        session.filtered_jobs = []
+        reset_search_session()
         return json_output(SearchJobsOutput(
             message=f"Found matching jobs, but failed to check Notion first: {e}",
             total_found=len(all_jobs),
@@ -130,10 +104,6 @@ def search_jobs(
             jobs=[],
         ))
 
-    available_jobs = [
-        job for job in matching_jobs if normalize_url(str(job.url)) not in notion_urls
-    ]
-    already_in_notion = len(matching_jobs) - len(available_jobs)
     session.search_results = available_jobs
     session.filtered_jobs = []
 
@@ -224,12 +194,40 @@ def filter_jobs(
             message="No newly discovered jobs found.",
             total_new_jobs=0, total_candidates=0, total_relevant=0, min_score=threshold, jobs=[],
         ))
- 
-    candidate_jobs = [j for j in new_jobs if matches_job(j, role, location)]
-    if not candidate_jobs:
+
+    try:
+        available_jobs, already_in_notion = remove_jobs_already_in_notion(new_jobs)
+    except Exception as e:
         return json_output(FilterJobsOutput(
-            message=f"Found {len(new_jobs)} new jobs, but none matched the requested role/location filters.",
-            total_new_jobs=len(new_jobs), total_candidates=0, total_relevant=0, min_score=threshold, jobs=[],
+            message=f"Found new jobs, but failed to check Notion before filtering: {e}",
+            total_new_jobs=len(new_jobs), total_candidates=0, total_relevant=0,
+            min_score=threshold, jobs=[],
+        ))
+
+    if not available_jobs:
+        session.filtered_jobs = []
+        return json_output(FilterJobsOutput(
+            message=(
+                f"Found {len(new_jobs)} new jobs, but all of them are already "
+                "in Notion."
+            ),
+            total_new_jobs=len(new_jobs), total_candidates=0, total_relevant=0,
+            min_score=threshold, jobs=[],
+        ))
+ 
+    candidate_jobs = [j for j in available_jobs if matches_job(j, role, location)]
+    if not candidate_jobs:
+        message = (
+            f"Found {len(available_jobs)} jobs not already in Notion, but none "
+            "matched the requested role/location filters."
+        )
+        if already_in_notion:
+            message += f" Skipped {already_in_notion} jobs already in Notion."
+
+        return json_output(FilterJobsOutput(
+            message=message,
+            total_new_jobs=len(available_jobs), total_candidates=0,
+            total_relevant=0, min_score=threshold, jobs=[],
         ))
  
     scorer = JobScorer(config)
@@ -253,20 +251,20 @@ def filter_jobs(
     max_results = max(1, max_results)
  
     msg = f"Found {len(relevant_jobs)} relevant new jobs with score >= {threshold}/10"
+    if already_in_notion:
+        msg += f" ({already_in_notion} jobs already in Notion were skipped)"
     if len(relevant_jobs) > max_results:
         msg += f" (showing top {max_results})"
  
     return json_output(FilterJobsOutput(
         message=msg,
-        total_new_jobs=len(new_jobs),
+        total_new_jobs=len(available_jobs),
         total_candidates=len(candidate_jobs),
         total_relevant=len(relevant_jobs),
         min_score=threshold,
         jobs=relevant_jobs[:max_results],
     ))
  
-
-
 @tool
 def save_jobs_to_notion(max_results: int = 10, status: str = "To apply") -> str:
     """Save the latest filtered jobs (or search results) to the Notion Applications database.

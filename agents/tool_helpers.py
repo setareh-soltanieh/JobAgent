@@ -6,6 +6,7 @@ import requests
 from dotenv import load_dotenv
 
 from config import load_config
+from scraper import JobScraper
 from .models import JobResult, NotionJobEntry, ScoredJobResult
 
 
@@ -20,6 +21,51 @@ session = AgentSession()
 
 def json_output(model_obj) -> str:
     return model_obj.model_dump_json(indent=2)
+
+
+def reset_search_session() -> None:
+    session.search_results = []
+    session.filtered_jobs = []
+
+
+def find_company_config(company_name: str, companies: list[dict]) -> dict | None:
+    if not company_name:
+        return None
+
+    return next(
+        (company for company in companies if company_name.lower() in company["name"].lower()),
+        None,
+    )
+
+
+def build_search_config(config: dict, role: str, location: str) -> dict:
+    search_text = " ".join(part for part in [role, location] if part).strip()
+    scraping_config = config.get("scraping", {})
+
+    return {
+        "scraping": {
+            "limit_per_page": scraping_config.get("limit_per_page", 20),
+            "rate_limit_delay": scraping_config.get("rate_limit_delay", 0),
+            "search_text": search_text,
+        },
+        "cache": config.get(
+            "cache",
+            {"enabled": True, "cache_file": "jobs_cache.json"},
+        ),
+    }
+
+
+def scrape_company_jobs(config: dict, company_config: dict) -> list[JobResult]:
+    scraper = JobScraper(config, company_config)
+    return [JobResult.from_scraped_job(job) for job in scraper.scrape_all()]
+
+
+def remove_jobs_already_in_notion(jobs: list[JobResult]) -> tuple[list[JobResult], int]:
+    notion_urls = load_notion_job_urls()
+    available_jobs = [
+        job for job in jobs if normalize_url(str(job.url)) not in notion_urls
+    ]
+    return available_jobs, len(jobs) - len(available_jobs)
 
 
 def load_seen_urls(csv_file: str) -> set[str]:

@@ -96,19 +96,15 @@ class NotionJobEntry(BaseModel):
         )
 
 
-class ToolOutput(BaseModel):
-    """Base shape for tool responses."""
-
+class SearchJobsOutput(BaseModel):
     message: str
-
-
-class SearchJobsOutput(ToolOutput):
     total_found: int
     total_matching: int
     jobs: list[JobResult]
 
 
-class FilterJobsOutput(ToolOutput):
+class FilterJobsOutput(BaseModel):
+    message: str
     total_new_jobs: int
     total_candidates: int
     total_relevant: int
@@ -116,7 +112,8 @@ class FilterJobsOutput(ToolOutput):
     jobs: list[ScoredJobResult]
 
 
-class ListCompaniesOutput(ToolOutput):
+class ListCompaniesOutput(BaseModel):
+    message: str
     companies: list[str]
 
 
@@ -126,7 +123,8 @@ class NotionSaveFailure(BaseModel):
     error: str
 
 
-class SaveJobsToNotionOutput(ToolOutput):
+class SaveJobsToNotionOutput(BaseModel):
+    message: str
     source: str
     saved_count: int
     saved: list[NotionJobEntry]
