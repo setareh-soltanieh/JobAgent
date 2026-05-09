@@ -20,7 +20,9 @@ from .tool_helpers import (
     build_notion_properties,
     json_output,
     load_seen_urls,
+    load_notion_job_urls,
     matches_job,
+    normalize_url,
     notion_headers,
     session,
 )
@@ -98,11 +100,11 @@ def search_jobs(
             total_found=0, total_matching=0, jobs=[],
         ))
  
-    session.search_results = all_jobs
-    session.filtered_jobs = []
     matching_jobs = [job for job in all_jobs if matches_job(job, role, location)]
 
     if not matching_jobs:
+        session.search_results = []
+        session.filtered_jobs = []
         filters = []
         if company_name:
             filters.append(f"company matching '{company_name}'")
@@ -116,16 +118,48 @@ def search_jobs(
             total_found=len(all_jobs), total_matching=0, jobs=[],
         ))
 
+    try:
+        notion_urls = load_notion_job_urls()
+    except Exception as e:
+        session.search_results = []
+        session.filtered_jobs = []
+        return json_output(SearchJobsOutput(
+            message=f"Found matching jobs, but failed to check Notion first: {e}",
+            total_found=len(all_jobs),
+            total_matching=len(matching_jobs),
+            jobs=[],
+        ))
+
+    available_jobs = [
+        job for job in matching_jobs if normalize_url(str(job.url)) not in notion_urls
+    ]
+    already_in_notion = len(matching_jobs) - len(available_jobs)
+    session.search_results = available_jobs
+    session.filtered_jobs = []
+
+    if not available_jobs:
+        return json_output(SearchJobsOutput(
+            message=(
+                f"Found {len(matching_jobs)} matching jobs, but all of them are "
+                "already in Notion."
+            ),
+            total_found=len(all_jobs),
+            total_matching=0,
+            jobs=[],
+        ))
+
     max_results = max(1, max_results)
-    msg = f"Found {len(matching_jobs)} matching jobs"
-    if len(matching_jobs) > max_results:
+    msg = f"Found {len(available_jobs)} available jobs"
+    if already_in_notion:
+        msg += f" ({already_in_notion} matching jobs already in Notion)"
+    if len(available_jobs) > max_results:
         msg += f" (showing first {max_results})"
  
     return json_output(SearchJobsOutput(
         message=msg,
         total_found=len(all_jobs),
-        total_matching=len(matching_jobs),
-        jobs=matching_jobs[:max_results],
+        total_matching=len(available_jobs),
+        jobs=available_jobs[:max_results],
     ))
 
 

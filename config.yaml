@@ -12,6 +12,14 @@ companies:
     tenant: "autodesk"
     site: "Ext"
     base_url: "https://autodesk.wd1.myworkdayjobs.com"
+  - name: "RBC"
+    tenant: "rbc"
+    site: "RBCGLOBAL1"
+    base_url: "https://rbc.wd3.myworkdayjobs.com"
+  - name: "BMO"
+    tenant: "bmo"
+    site: "external"
+    base_url: "https://bmo.wd3.myworkdayjobs.com"
   
 
 scoring:
